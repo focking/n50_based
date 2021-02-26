@@ -2,21 +2,22 @@ AddCSLuaFile()
 
 ENT.Base 			= "base_nextbot"
 ENT.Spawnable		= true
+ENT.WeaponToUse = table.Random({"AR","AR"})
 
 function ENT:Initialize()
 
-	self:SetModel( "models/tfusion/playermodels/mw3/mp_gign_c.mdl" )
+	self:SetModel( "models/pm/moviesf/operator3b.mdl" )
 	
 	self.LoseTargetDist	= 2000	-- How far the enemy has to be before we lose them
 	self.SearchRadius 	= 1000	-- How far to search for enemies
-	self:N50_GiveWeapon()
+	self:N50_GiveWeapon(self.WeaponToUse)
 	self.move_ang = Angle()
 	self.OBBVec1, self.OBBVec2 = self:GetCollisionBounds() 
 	vec1, vec2 = self:GetCollisionBounds()
 
 --	self:SetCollisionBoundsWS( vec1, vec2 + Vector(0,-16,64))
 	self:SetHealth(self.NPCHealth)
-
+	self.NextGrenade = CurTime() + math.random(10,14)
 
 end
 
@@ -27,12 +28,14 @@ ENT.SearchRange = 6000
 ENT.NextScan = CurTime()
 ENT.NextStuck = 0
 ENT.AutomaticFrameAdvance = true 
-ENT.NPCHealth = 80
+ENT.NPCHealth = 90
 
 ENT.RagdollFreezeTime = 4
 
 function ENT:N50_SearchEnemy()
 	if SERVER then  
+		if self.NextScan <= CurTime() then 
+			self.NextScan = CurTime() + 1
 		if GetConVar("ai_ignoreplayers"):GetInt() == 1 then return end
 		for k,v in ipairs(player.GetAll()) do 
 			if self:N50_CanSee(v) then 
@@ -42,13 +45,14 @@ function ENT:N50_SearchEnemy()
 				end
 			end 
 		end 
+		end
 	end
 end 
 
 function ENT:N50_CanSee(ent) 
     if IsValid(ent) and self:Visible(ent) and self:N50_EnemyCheck(ent) and self:N50_VisiableAngle(ent)then return true else return false end
 end 
-
+ENT.IsN50Bot = true 
 function ENT:N50_VisiableAngle(ent)
     local directionAngCos = math.cos(math.pi / 16)
 	local aimVector = self:GetForward()*self.SearchRange
@@ -57,8 +61,22 @@ function ENT:N50_VisiableAngle(ent)
 	if angCos >= directionAngCos then return true else return false end
 end 
 
-function ENT:N50_AlertNearbyUnits()
-	
+ENT.NextAlert = CurTime()
+
+function ENT:N50_AlertNearbyUnits(attacker)
+	if self.NextAlert <= CurTime() then 
+		self.NextAlert = CurTime() + 10
+		for k,v in pairs(ents.FindInSphere(self:GetPos(), 512)) do 
+			if v.IsN50Bot == true then 
+				if v.Enemy == nil then 
+					if self:Visible(v) then 
+						v:N50_SetEnemy(attacker)
+						v.Weapon.Delay = CurTime() + math.random(1,3)
+					end  
+				end 
+			end 
+		end 
+	end
 end 
 
 function ENT:N50_EnemyCheck(ent)
@@ -116,6 +134,8 @@ function ENT:N50_ChaseEnemy()
 		if self:N50_CanSee(self:N50_GetEnemy()) then 
 			self:N50_BodyMoveYaw() 
 			self:N50_Shot(self:N50_GetEnemy():GetPos())
+		else 
+			self.Weapon.Delay = CurTime() + 1
 		end 
 
 		if ( options.draw ) then path:Draw() end
@@ -176,7 +196,7 @@ end
 
 function ENT:N50_HandleStuck(path)
 	if self.loco:GetVelocity():Length() <= 2 then 
-		self.NextStuck = self.NextStuck + 1
+		--self.NextStuck = self.NextStuck + 1
 		print(self.NextStuck)
 	end
 
@@ -190,7 +210,7 @@ end
 
 function ENT:N50_IdleActivity()
 	self:N50_SetupActivity("walk")
-	self:N50_MoveToPos(self:GetPos() + Vector( math.Rand( -1, 1 ), math.Rand( -1, 1 ), 0 ) * 420 )
+	self:N50_MoveToPos(self:GetPos() + Vector( math.Rand( -1, 1 ), math.Rand( -1, 1 ), 0 ) * 512 )
 end 
 
 function ENT:N50_SetupActivity(task,force)
@@ -224,6 +244,7 @@ end
 
 ENT.WalkActivity = ACT_HL2MP_WALK_AR2
 ENT.RunActivity = ACT_HL2MP_RUN_AR2
+ENT.GrenadeActivity = ACT_HL2MP_IDLE_GRENADE
 
 AVALIABLE_ACTIVITY_TABLE = {
 	"walk","run",
@@ -240,6 +261,11 @@ ACTIVITY_TABLE = {
 		self:StartActivity(self.RunActivity)
 		self.loco:SetDesiredSpeed(self.RunSpeed)
 		self:N50_SetTask("run")
+	end,
+	["grenade"] = function(self)
+		self:StartActivity(self.GrenadeActivity)
+		self.loco:SetDesiredSpeed(self.WalkSpeed)
+		self:N50_SetTask("grenade")
 	end,
 }
 
@@ -258,20 +284,57 @@ TASK_TABLE = {
 }
 
 WEAPON_TABLE = {
-	["AK"] = {
+	["AR"] = {
 		Model = "models/arachnit/insurgency_sandstorm/weapons/assault_rifles/m4a1.mdl",
+		Damage = 22,
+		Num = 1,
+		Tracer = "tracer_green",
+		Magazine = 30,
+		A_Reload = "reload_smg1",
+		ROF = 850,
+		BaseSpread = Vector(0.03,0.03,0),
+		TracerEvery = 3,
+		FireSound = "weapons/tfa_eft/m4a1/m4_fp.wav",
+		ReloadSound = "boomsticks/misc/full_reload_m4.wav",
+		ReloadTime = 3,
+		OffsetPosition = Vector(2,-3,1), -- forward -- up -- right
+		MagModel = "models/arachnit/insurgency_sandstorm/weapons/assault_rifles/m4a1_magazine.mdl",
+		["OnReload"] = function(self,weapon)
+			weapon:SetBodygroup(10, 3)
+			self:N50_DropMagazine()
+			timer.Simple(1.5,function()
+				if IsValid(weapon) then 
+					weapon:SetBodygroup(10, 0)
+				end
+			end) 
+		end,
+	},
+	["MP5"] = {
+		Model = "models/arachnit/insurgency_sandstorm/weapons/sub_machine_guns/mp5a5.mdl",
 		Damage = 12,
 		Num = 1,
 		Tracer = "tracer_green",
 		Magazine = 30,
 		A_Reload = "reload_smg1",
-		ROF = 650,
-		BaseSpread = Vector(0.04,0.04,0),
+		ROF = 850,
+		BaseSpread = Vector(0.032,0.032,0),
 		TracerEvery = 3,
-		FireSound = "weapons/tfa_eft/m4a1/m4_fp.wav",
+		FireSound = "boomsticks/mp5/fire.wav",
+		ReloadSound = "boomsticks/misc/full_reload_m4.wav",
+		ReloadTime = 3,
+		OffsetPosition = Vector(0.5,-2,1),
+		MagModel = "models/arachnit/insurgency_sandstorm/weapons/sub_machine_guns/mp5a5_magazine.mdl",
+		["OnReload"] = function(self,weapon)
+			weapon:SetBodygroup(5,3)
+			self:N50_DropMagazine()
+			timer.Simple(1.5,function()
+				if IsValid(weapon) then 
+					weapon:SetBodygroup(5, 0)
+				end
+			end) 
+		end,
 	}
 }
-
 
 
 
@@ -284,32 +347,102 @@ function ENT:Think()
 			end 
 		end 
 
-		if IsValid(self.DynamicMuzzle) then 
-			if self.DynamicMuzzle.LifeTime <= CurTime() then 
-				self.DynamicMuzzle:Remove()
-			end 
-		end 
-
-
+	--if IsValid(self.DynamicMuzzle) then 
+	--	if self.DynamicMuzzle.LifeTime < CurTime() then 
+	--		self.DynamicMuzzle:Remove()
+	--	end 
+	--end 
 
 	end 
 end 
 
-function ENT:N50_OnEnemyDeath()
-	print("OnEnemyDeath")
+function ENT:N50_RemoveWeapon()
+	if SERVER then
+		if self:N50_HaveWeapon() then  
+			self.Weapon:Remove()
+		end
+	end 
 end 
 
+function ENT:N50_OnEnemyDeath()
+end 
+
+ENT.GrenadeMinDistance = 512
+ENT.GrenadeMaxDistance = 1024
+
+function ENT:N50_GrenadeTo(pos)
+	if self.NextGrenade >= CurTime() then return end
+	local dist = self:GetPos():Distance(pos)
+	if dist > self.GrenadeMaxDistance or dist < self.GrenadeMinDistance then return end
+	self.NextGrenade = self.NextGrenade + math.random(30,160)
+	local weapon = self.Weapon.Name
+	local mag = self.Weapon.Magazine
+	self:N50_RemoveWeapon()
+
+	self:NB_PlayGestureSequenceAndWait("holster_ar",0.30,0.29)
+	local boner = self:LookupBone("ValveBiped.Bip01_R_Hand")
+	local bone_pos = self:GetBonePosition(boner)
+	if bone_pos == self:GetPos() then
+		bone_pos = self:GetBoneMatrix(boner):GetTranslation()
+	end
+
+	self.NadeMDL = ents.Create("prop_dynamic")
+	self.NadeMDL:SetModel( "models/weapons/w_eq_fraggrenade_thrown.mdl" )
+	self.NadeMDL:SetPos( bone_pos )
+	self.NadeMDL:SetAngles( Angle(0,90,90) )
+	self.NadeMDL:SetParent( self )
+	self.NadeMDL:Fire("setparentattachment", "Anim_Attachment_RH", 0.01 )
+	self:N50_SetupActivity("grenade",true)
+	self:NB_PlayGestureSequenceAndWait("draw_grenade",0.30,0.30)
+	self:EmitSound("boomsticks/misc/rgd_pin.wav")
+	self.HoldingLiveGrenade = true
+	self:N50_SetupActivity("grenade",true)
+	self:EmitSound("boomsticks/misc/rgd_throw.wav")
+	self:N50_Aim(pos)
+	self.loco:FaceTowards(pos)
+	self:NB_PlayGestureSequenceAndWait("range_grenade",0.5,0.30)
+	self:N50_Aim(pos)
+	self.loco:FaceTowards(pos)
+	local ThrowVel = (pos+self:OBBCenter() - self:GetPos()) 
+	local gent = ents.Create("n40_grenade") 
+	gent:SetPos(bone_pos) 
+	gent:Spawn()
+	local phys = gent:GetPhysicsObject() 
+		if IsValid(phys) then
+			phys:Wake()
+			phys:AddAngleVelocity(Vector(math.Rand(500,500),math.Rand(500,500),math.Rand(500,500)))
+			phys:SetVelocity(ThrowVel)
+			self.HoldingLiveGrenade = false
+		end
+	self.NadeMDL:Remove()
+	self:N50_SetupActivity("run",true)
+--	self:N50_SetupActivity("grenade",true)
+	self:N50_GiveWeapon(weapon)
+	self:NB_PlayGestureSequenceAndWait("draw_ar",0.30,0)
+	self:N50_SetupActivity("run",true)
+end
 
 function N50_GetWeaponData(name)
 	return WEAPON_TABLE[tostring(name)]
 end 
  
+ENT.ShouldDropMags = true 
 
+function ENT:N50_DropMagazine()
+	if self.ShouldDropMags then 
+		local a = ents.Create("prop_physics")
+		a:SetModel(self.Weapon.MagModel)
+		a:SetPos(self.Weapon:GetBonePosition( self.Weapon:LookupBone("b_wpn_mag")))
+		a:Spawn()
+		a:SetCollisionGroup(COLLISION_GROUP_DEBRIS)
+	end 
+end 
 
 function ENT:N50_GiveWeapon(weapon)
-	local weapon = "AK"
 
 	if SERVER then 
+
+		if IsValid(self.Weapon) then self.Weapon:Remove() end 
 
 		local att = "anim_attachment_RH"
 	
@@ -329,8 +462,8 @@ function ENT:N50_GiveWeapon(weapon)
 	
 			local m = Matrix() 
 			m:SetAngles(self:GetAttachment( self:LookupAttachment(att)).Ang)
-	
-			wep:SetPos(pos + m:GetForward()*5 -  m:GetUp()*3 +  m:GetRight()*1)
+			local vec = N50_GetWeaponData(weapon).OffsetPosition
+			wep:SetPos(pos + m:GetForward()*vec.x +  m:GetUp()*vec.y +  m:GetRight()*vec.z)
 	
 			wep:SetAngles(self:GetAttachment( self:LookupAttachment(att)).Ang)
 			wep:SetParent(self,att)
@@ -338,7 +471,7 @@ function ENT:N50_GiveWeapon(weapon)
 		end)
 
 		self.Weapon = wep
-		self.Weapon.Name = weapon 
+		self.Weapon.Name = weapon
 		self.Weapon.Model = N50_GetWeaponData(self.Weapon.Name).Model
 		self.Weapon.Damage = N50_GetWeaponData(self.Weapon.Name).Damage
 		self.Weapon.Num = N50_GetWeaponData(self.Weapon.Name).Num
@@ -349,56 +482,76 @@ function ENT:N50_GiveWeapon(weapon)
 		self.Weapon.BaseSpread = N50_GetWeaponData(self.Weapon.Name).BaseSpread
 		self.Weapon.TracerEvery = N50_GetWeaponData(self.Weapon.Name).TracerEvery
 		self.Weapon.Delay = CurTime()
+		self.Weapon.ReloadSound = CreateSound( self, N50_GetWeaponData(self.Weapon.Name).ReloadSound )
 		self.Weapon.FireSound = N50_GetWeaponData(self.Weapon.Name).FireSound
+		self.Weapon.ReloadTime = N50_GetWeaponData(self.Weapon.Name).ReloadTime
+		self.Weapon.MagModel = N50_GetWeaponData(self.Weapon.Name).MagModel
 
-		self:AddFlashlight()
+		--self:AddFlashlight()
 	end
 
 end 
 
+
+--function ENT:N50_ChangeWeaponTo()
+--	self:NB_PlayGestureSequenceAndWait("holster_ar",0.5)
+--	self:N50_GiveWeapon("MP5")
+--end
+
 function ENT:AddFlashlight()
-	local shootpos = self:GetAttachment(self:LookupAttachment("anim_attachment_LH"))
-
-	local flashlight = ents.Create("prop_dynamic")
-	flashlight:SetPos(self.Weapon:GetPos())
-	flashlight:SetModel("models/arachnit/insurgency_sandstorm/weapons/attachments/attachment_flashlights.mdl")
-	flashlight:SetParent(self.Weapon)
-	flashlight:Spawn()
-	flashlight:SetPos(self.Weapon:GetForward()*12 + self.Weapon:GetUp()*-5)
-
-	local wep = ents.Create("bd_lamp")
-	wep:SetPos(self.Weapon:GetPos())
-
-	wep:SetModel(Model("models/arachnit/insurgency_sandstorm/weapons/attachments/attachment_flashlights.mdl"))
-	wep:SetParent(flashlight)
-	wep:Spawn()
-	wep:SetPos(flashlight:GetPos() - wep:GetUp() * -10)
-	wep:SetFlashlightTexture("effects/flashlight/soft")
-	wep:SetColor(Color(255, 255, 255))
-	wep:SetDistance(512)
-	wep:SetBrightness(1)
-	wep:SetLightFOV(80)
-	wep:Switch(true)
-	wep:SetModelScale(1, 0)
-	wep:SetSolid(SOLID_NONE)
-
-	self.Flashlight = wep
+--	local shootpos = self:GetAttachment(self:LookupAttachment("anim_attachment_LH"))
+--
+--	local flashlight = ents.Create("prop_dynamic")
+--	flashlight:SetPos(self.Weapon:GetPos())
+--	flashlight:SetModel("models/arachnit/insurgency_sandstorm/weapons/attachments/attachment_flashlights.mdl")
+--	flashlight:SetParent(self.Weapon)
+--	flashlight:Spawn()
+--	flashlight:SetPos(self.Weapon:GetForward()*12 + self.Weapon:GetUp()*-5)
+--
+--	local wep = ents.Create("bd_lamp")
+--	wep:SetPos(self.Weapon:GetPos())
+--
+--	wep:SetModel(Model("models/arachnit/insurgency_sandstorm/weapons/attachments/attachment_flashlights.mdl"))
+--	wep:SetParent(flashlight)
+--	wep:Spawn()
+--	wep:SetPos(flashlight:GetPos() - wep:GetUp() * -10)
+--	wep:SetFlashlightTexture("effects/flashlight/soft")
+--	wep:SetColor(Color(255, 255, 255))
+--	wep:SetDistance(512)
+--	wep:SetBrightness(1)
+--	wep:SetLightFOV(80)
+--	wep:Switch(true)
+--	wep:SetModelScale(1, 0)
+--	wep:SetSolid(SOLID_NONE)
+--
+--	self.Flashlight = wep
 end
 
+function ENT:N50_HaveWeapon()
+	if IsValid(self.Weapon) then return true else return false end
+end 
+
+ENT.ShouldReloadNextTime = false
 
 function ENT:N50_OnReload()
-	--self:EmitSound("vox/reload_0"..math.random(1,3)..".wav", math.random(95,105), 100, 1, CHAN_VOICE)
-
+	local f = N50_GetWeaponData(self.Weapon.Name)["OnReload"]
+	if f then f(self,self.Weapon) end
 end 
 
 function ENT:N50_Shot(pos)
-
+	self:N50_GrenadeTo(pos)
+	if not self:N50_HaveWeapon() then return end
 	if self.Weapon.Delay > CurTime() then return end 
 
-	if self.Weapon.Magazine <= 0 then 
-		self:EmitSound("vox/trigger_empty.wav", math.random(95,105), 100, 1, CHAN_VOICE)
-		self.Weapon.Magazine = 0
-		self.Weapon.Delay = CurTime() + 1.25
+	if self.Weapon.Magazine <= 0 and self.ShouldReloadNextTime == false then 
+		self.ShouldReloadNextTime = true 
+		self:EmitSound("vox/trigger_empty.wav", 100, 100, 1, CHAN_AUTO)
+		self.Weapon.Delay = CurTime() + 1
+		return
+	end 	
+
+	if self.Weapon.Magazine <= 0 and self.ShouldReloadNextTime == true then 
+		self.ShouldReloadNextTime = false
 		self:N50_OnReload()
 		return self:N50_Reload()
 	end 	
@@ -415,14 +568,14 @@ function ENT:N50_Shot(pos)
 	self.loco:FaceTowards(pos)
 	self:N50_Aim(pos)
 
-	self.DynamicDelay = math.random(0,0.5)
+	self.DynamicDelay = math.random(0,0.2)
 
 	local bullet = {}
 
 	bullet.Num 	= self.Weapon.Num
 	bullet.Dir 	= ang:Forward()
 	bullet.Src 	= self.Weapon.Muzzle
-	bullet.Spread 	= self.Weapon.BaseSpread
+	bullet.Spread 	= self.Weapon.BaseSpread + Vector(math.random())
 	bullet.Tracer	= self.Weapon.TracerEvery
 	bullet.TracerName = self.Weapon.Tracer
 	bullet.Force	= self.Weapon.Damage 
@@ -435,16 +588,17 @@ function ENT:N50_Shot(pos)
 	self:N50_FireEffects()
 	--self:AddGesture( self:GetSequenceActivity( self:LookupSequence("gesture_shoot_ar2"),false))
 
-	self.Weapon.Magazine = self.Weapon.Magazine - self.Weapon.Num
+	self.Weapon.Magazine = self.Weapon.Magazine - self.Weapon.Num 
 
 	self.Weapon.Delay = CurTime() + 60 / self.Weapon.ROF + self.DynamicDelay
 end 
 
 function ENT:N50_Reload()
-
 	if not self.Weapon.IsReloading then
+		self.Weapon.ReloadSound:Play()
 
-		self.Weapon.Delay = self.Weapon.Delay + 2
+		---self:EmitSound("boomsticks/misc/full_reload_m4.wav", math.random(95,105), 100, 1, CHAN_ITEM)
+		self.Weapon.Delay = self.Weapon.Delay + self.Weapon.ReloadTime
 		self.Weapon.IsReloading = true
 		local activity = self:GetActivity()
 
@@ -455,6 +609,9 @@ function ENT:N50_Reload()
 		self:StartActivity(activity)
 	end
 end 
+
+
+
 
 function ENT:NB_PlayGestureSequence( name, speed , delay )
 	local speed = speed or 1
@@ -484,22 +641,23 @@ end
 
 function ENT:N50_FireEffects()
 	if not IsFirstTimePredicted() then return end
+	self.Weapon.Muzzle = self.Weapon:GetBonePosition( self.Weapon:LookupBone("b_attachment_barrel_root"))
+	self.Weapon.Muzzle = self.Weapon.Muzzle + self.Weapon:GetForward()*8
 	ParticleEffect( "muzzleflash_ar2_npc", self.Weapon.Muzzle, self.Weapon:GetAngles() )
-
---local light = ents.Create("light_dynamic")
---light:Spawn()
---light:Activate()
---light:SetKeyValue("distance", 256) 
---light:SetKeyValue("brightness", 5)
---light:SetKeyValue("brightness", 5)
---light:SetKeyValue("_light", "255 192 64") 
---light:Fire("TurnOn")
---light:SetPos(self.Weapon:GetPos())
---light.LifeTime = CurTime() + 0.25
---self.DynamicMuzzle = light 
-----timer.Simple(0.1,function() light:Remove() end)
+	--local light = ents.Create("light_dynamic")
+	--light:Spawn()
+	--light:Activate()
+	--light:SetKeyValue("distance", 256) 
+	--light:SetKeyValue("brightness", 5)
+	--light:SetKeyValue("brightness", 5)
+	--light:SetKeyValue("_light", "255 192 64") 
+	--light:Fire("TurnOn")
+	--light:SetPos(self.Weapon:GetPos())
+	--light:SetParent(self.Weapon)
+	--light.LifeTime = CurTime() + 0.25
+	--self.DynamicMuzzle = light 
+	--timer.Simple(0.1,function() light:Remove() end)
 end 
-
 
 
 function ENT:N50_BodyMoveYaw() -- Иди нахуй https://github.com/raubana/robustsnextbot/blob/master/lua/entities/base_robustsnextbot/sv_animation.lua
@@ -522,6 +680,8 @@ function ENT:N50_BodyMoveYaw() -- Иди нахуй https://github.com/raubana/r
 			self.loco:FaceTowards(self:N50_GetEnemy():GetPos())
 		end
 	end 
+
+
 end
 
 function ENT:N50_Aim(vec)
@@ -602,7 +762,7 @@ OBSTACLE_TABLE = {
 function ENT:N50_OnEnemy()
 	if not self:N50_HaveEnemy() then 
 		self:EmitSound("vox/contact_0"..math.random(1,7)..".wav", math.random(95,105), 100, 1, CHAN_VOICE)
-		self.Weapon.Delay = CurTime() + 1
+		self.Weapon.Delay = CurTime() + 2
 	end 
 end 
 
@@ -639,6 +799,19 @@ function ENT:OnKilled(dmginfo)
 	self:Remove()
 	self:N50_BecomeRagdoll(dmginfo)
 	self:EmitSound("vox/death_0"..math.random(1,7)..".wav", math.random(95,105), 100, 1, CHAN_ITEM)
+	if self.HoldingLiveGrenade == true then 
+		local boner = self:LookupBone("ValveBiped.Bip01_R_Hand")
+		local bone_pos = self:GetBonePosition(boner)
+		if bone_pos == self:GetPos() then
+			bone_pos = self:GetBoneMatrix(boner):GetTranslation()
+		end
+		local gent = ents.Create("n40_grenade") 
+		gent:SetPos(bone_pos) 
+		gent:Spawn()	
+	end 
+	if IsValid(self.Weapon.ReloadSound) and self.Weapon.ReloadSound:IsPlaying() then 
+		self.Weapon.ReloadSound:Stop()
+	end 
 end 
 
 
@@ -654,7 +827,22 @@ FLINCH_TABLE = {
 
 ENT.NextHitSound = CurTime()
 
+ENT.HitBoxToHitGroup = {
+	[0] = HITGROUP_HEAD,
+	[16] = HITGROUP_CHEST,
+	[15] = HITGROUP_STOMACH,
+	[5] = HITGROUP_RIGHTARM,
+	[2] = HITGROUP_LEFTARM,
+	[12] = HITGROUP_RIGHTLEG,
+	[8] = HITGROUP_LEFTLEG
+}
+
 function ENT:OnInjured(dmginfo)
+	self:N50_AlertNearbyUnits(dmginfo:GetAttacker())
+	self.Weapon.Delay = CurTime() + 1
+	if not self:N50_HaveEnemy() and dmginfo:GetAttacker():IsPlayer() then 
+	--	self:N50_SetEnemy(dmginfo:GetAttacker())
+	end 
 	if self:Health() <= 50 then 
 		self.WalkActivity = 2321
 		self.RunActivity = 2321
@@ -668,6 +856,26 @@ function ENT:OnInjured(dmginfo)
 		self:EmitSound("vox/hit_0"..math.random(1,7)..".wav", math.random(95,105), 100, 1, CHAN_ITEM)
 		self.NextHitSound = CurTime() + 1
 	end
+
+
+	local pos = dmginfo:GetDamagePosition()
+	local hitgroup = 0
+
+	local dist_to_hitgroups = {}
+	for hitbox,hitgroup in pairs(self.HitBoxToHitGroup) do
+		local bone = self:GetHitBoxBone(hitbox, 0)
+		if bone then
+			local bonepos, boneang = self:GetBonePosition(bone)
+			table.insert(dist_to_hitgroups, {bonename = self:GetBoneName(bone), hitgroup = hitgroup, dist = pos:Distance(bonepos)})
+		end
+	end 
+
+	table.SortByMember(dist_to_hitgroups, "dist", true)
+	hitgroup = dist_to_hitgroups[1].hitgroup
+
+	if hitgroup == 0 then 
+		dmginfo:ScaleDamage(3)
+	end 	
 end
 
 function ENT:N50_BecomeRagdoll(dmginfo)
@@ -700,11 +908,13 @@ function ENT:N50_BecomeRagdoll(dmginfo)
  	local head = rag:GetPhysicsObjectNum(math.random(6,7))
  	head:ApplyForceOffset( Vector(math.random(0,256), math.random(0,256), math.random(0,256)), self:GetPos() + Vector( math.Rand( -1, 1 ), math.Rand( -1, 1 ), 0 ) * 512)
 
- 	local weapon = ents.Create("prop_physics")
- 	weapon:SetModel(N50_GetWeaponData(self.Weapon.Name).Model)
- 	weapon:SetPos(self.Weapon:GetPos())
- 	weapon:Spawn()
- 	weapon:SetCollisionGroup(COLLISION_GROUP_DEBRIS )
+ 	if self:N50_HaveWeapon() then 
+ 		local weapon = ents.Create("prop_physics")
+ 		weapon:SetModel(N50_GetWeaponData(self.Weapon.Name).Model)
+ 		weapon:SetPos(self.Weapon:GetPos())
+ 		weapon:Spawn()
+ 		weapon:SetCollisionGroup(COLLISION_GROUP_DEBRIS )
+ 	end
 
 	timer.Simple(self.RagdollFreezeTime,function()
  		if not IsValid(rag) then return end
